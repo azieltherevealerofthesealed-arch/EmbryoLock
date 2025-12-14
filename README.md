@@ -1,39 +1,53 @@
 # EmbryoLock
 
-EmbryoLock is a simple, offline encrypted vault for sensitive files.
+EmbryoLock is a **local file vault** designed around a narrow security tradeoff:
+in certain situations, **irreversible destruction is preferable to delayed access**.
 
-No accounts.  
-No cloud.  
-No recovery.
+This project is not a general-purpose encryption tool.
 
-## What this is
-- Local-only encryption
-- Runs offline
-- You control the key
-- If the vault wipes, everything wipes
+---
 
-## What this is NOT
-- No password recovery
-- No customer support
-- No cloud sync
-- No telemetry
+## Threat Model
 
-## Editions
-- **Basic** — core encrypted vault
-- **Neon** — enhanced UI + safeguards
-- **Stealth+** — hardened, minimal footprint build
+### In scope
+- Post-unlock device theft
+- Delayed or opportunistic access
+- Casual or non-expert forensic inspection
+- Scenarios where **loss is preferable to later compromise**
 
-## Buying & Downloading
-Purchases are crypto-only (BTC / ETH / Polygon).
+### Out of scope
+- Unlimited offline cloning
+- Live malware, keyloggers, or memory inspection
+- Attackers with long-term interactive access
+- Nation-state or forensic-lab adversaries
 
-After payment confirmation, you receive a **one-time, time-limited download link**.
+> If an attacker can freely clone the vault and attempt passwords indefinitely,
+> security reduces to the strength of the password/KDF alone.
 
-Miss the window → repurchase required.
+---
 
-See **BUY.md** for exact steps.
+## What This Is
+- A **destructive-by-design** vault
+- A risk-reduction tool for **specific scenarios**
+- A learning and exploration project
 
-## Important
-If you lose the key, the data is gone.  
-This software is for people who understand that tradeoff.
+## What This Is Not
+- A replacement for standard encryption tools
+- Protection against determined offline brute-force
+- Safe against user error
 
-Use it if it fits your threat model.
+---
+
+## Documentation
+- [DESIGN.md](DESIGN.md)
+- [LIMITATIONS.md](LIMITATIONS.md)
+- [USAGE.md](USAGE.md)
+- [FAQ.md](FAQ.md)
+- [SECURITY.md](SECURITY.md)
+
+---
+
+## Warning
+
+This tool can permanently destroy data.
+Use only if you understand and accept that risk.

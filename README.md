@@ -1,40 +1,39 @@
-
 # EmbryoLock
 
-EmbryoLock is a local, offline-first encryption vault designed for users who value privacy, discretion, and control.
+EmbryoLock is a simple, offline encrypted vault for sensitive files.
 
-No accounts.
-No cloud.
-No recovery keys.
-No telemetry.
+No accounts.  
+No cloud.  
+No recovery.
 
-What you encrypt stays yours — permanently.
+## What this is
+- Local-only encryption
+- Runs offline
+- You control the key
+- If the vault wipes, everything wipes
 
----
+## What this is NOT
+- No password recovery
+- No customer support
+- No cloud sync
+- No telemetry
 
 ## Editions
+- **Basic** — core encrypted vault
+- **Neon** — enhanced UI + safeguards
+- **Stealth+** — hardened, minimal footprint build
 
-### 🔹 Basic — $7.99
-Core encrypted vault with manual controls.
+## Buying & Downloading
+Purchases are crypto-only (BTC / ETH / Polygon).
 
-### 🔹 Neon — $12.99
-Enhanced UI, expanded vault handling, advanced session behavior.
+After payment confirmation, you receive a **one-time, time-limited download link**.
 
-### 🔹 Stealth+ — $15.99
-Maximum discretion. Hardened workflows. Minimal attack surface.
+Miss the window → repurchase required.
 
----
+See **BUY.md** for exact steps.
 
-## Purchase
-See [BUY.md](BUY.md) for crypto payment instructions.
+## Important
+If you lose the key, the data is gone.  
+This software is for people who understand that tradeoff.
 
-## Verify Downloads
-See [VERIFY.md](VERIFY.md) to confirm file integrity.
-
----
-
-## Important Notes
-- Each purchase grants access to one edition.
-- There is **no password or vault recovery**.
-- Lost keys require repurchase.
-- EmbryoLock is provided as-is for personal use.
+Use it if it fits your threat model.

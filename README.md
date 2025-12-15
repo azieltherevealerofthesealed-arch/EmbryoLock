@@ -1,9 +1,17 @@
-# EmbryoLock
+## EmbryoLock
 
-EmbryoLock is a **local file vault** designed around a narrow security tradeoff:
-in certain situations, **irreversible destruction is preferable to delayed access**.
+EmbryoLock is a local file vault that intentionally prioritizes **data destruction over recovery** after failed authentication attempts.
 
-This project is not a general-purpose encryption tool.
+It is designed for a narrow threat model where:
+- Post-unlock theft
+- Delayed access
+- Casual forensic inspection
+
+are higher risks than accidental data loss.
+
+This project does **not** attempt to defend against unlimited offline cloning or brute-force attacks. If an attacker can freely duplicate the vault and retry indefinitely, security reduces to the strength of the password and KDF alone.
+
+This tool exists to explore whether catastrophic failure can meaningfully reduce real-world access windows in certain scenarios — not to replace established, audited encryption systems.
 
 ---
 

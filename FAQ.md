@@ -1,20 +1,13 @@
 # FAQ
 
-## What stops someone from cloning the vault?
-Nothing. Cloning defeats the self-destruct mechanism.
+**Q: Can an attacker clone the vault and brute-force it offline?**  
+Yes. That threat is out of scope.
 
-## Why not just use standard encryption?
-Standard encryption optimizes for recoverability.
-EmbryoLock optimizes for destruction in narrow cases.
+**Q: Why allow irreversible destruction?**  
+To eliminate delayed or post-unlock access where recovery is less important than denial.
 
-## Is this secure?
-Only within its stated threat model.
+**Q: Is this safer than standard encryption tools?**  
+No. It serves a different purpose and threat model.
 
-## Is this dangerous?
-Yes. Intentionally.
-
-## Who is this for?
-Users who knowingly accept data loss to reduce certain risks.
-
-## Why publish this at all?
-To explore, document, and discuss a specific security tradeoff.
+**Q: Who should not use this?**  
+Anyone who cannot accept permanent data loss.

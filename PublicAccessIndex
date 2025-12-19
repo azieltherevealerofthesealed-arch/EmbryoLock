@@ -1,0 +1,85 @@
+INDEX
+
+EmbryoLock — Stealth Edition
+
+EmbryoLock is a local, offline file vault designed for situations where data persistence is a liability.
+
+It intentionally prioritizes irreversibility over recovery.
+
+There is no cloud.
+There is no account.
+There is no reset.
+There is no backdoor.
+
+If access fails, the data is destroyed by design.
+
+This tool exists for researchers, journalists, operators, and individuals who understand that in certain threat models, losing data is safer than keeping it.
+
+EmbryoLock is free.
+No telemetry.
+No tracking.
+No analytics.
+
+Use it only if you understand the consequences.
+
+What EmbryoLock Is
+
+A local encryption vault
+
+Offline by default
+
+Designed to self-destruct after failed authentication
+
+Built to reduce historical exposure risk
+
+What EmbryoLock Is Not
+
+A backup system
+
+A password manager
+
+A recovery tool
+
+A guarantee of safety
+
+Distribution
+
+EmbryoLock is provided as-is, free of charge.
+Optional crypto donations are accepted but confer no rights, support, or warranties.
+
+DISCLAIMER
+
+READ THIS BEFORE USE
+
+EmbryoLock permanently destroys encrypted data under certain conditions.
+This behavior is intentional and irreversible.
+
+By using this software, you acknowledge and agree that:
+
+Data loss is expected behavior
+EmbryoLock is designed to destroy data. If this occurs, recovery is impossible.
+
+No warranties are provided
+This software is provided “as is”, without warranty of any kind, express or implied.
+
+You assume all risk
+The author is not responsible for data loss, misuse, misunderstanding, or operational failure.
+
+No support or recovery exists
+There are no master keys, reset mechanisms, or backdoors.
+
+Jurisdictional responsibility is yours
+You are responsible for ensuring lawful use in your jurisdiction.
+
+DO NOT USE EMBRYOLOCK IF
+
+You cannot afford permanent data loss
+
+You expect technical support
+
+You require recovery options
+
+You are unsure how it works
+
+Once data is destroyed, it is gone.
+That is the point.

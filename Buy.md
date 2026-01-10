@@ -18,3 +18,4 @@ V2  -
 
 👉 https://embryolock-pay.azieltherevealerofthesealed.workers.dev/pay/stealth2
 
+וְאַתָּה דָנִיֵּאל סְתֹם הַדְּבָרִים וַחֲתֹם הַסֵּפֶר עַד־עֵת קֵץ יְשֹׁטְטוּ רַבִּים וְתִרְבֶּה הַדָּעַת

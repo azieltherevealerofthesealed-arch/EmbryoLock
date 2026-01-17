@@ -1,5 +1,61 @@
 # Security Policy
 
+## Supported Versions
+Only the latest release and the `main` branch are actively supported.
+
+Older versions may contain known or unknown vulnerabilities and should
+not be relied upon for secure deployments.
+
+## Reporting a Vulnerability
+
+If you believe you have found a security vulnerability in EmbryoLock:
+
+- **Do NOT open a public issue**
+- Do NOT disclose details publicly before coordination
+
+Instead, use one of the following:
+- GitHub Security Advisories (preferred)
+- Or contact the repository owner privately via GitHub
+
+Please include:
+- A clear description of the issue
+- Steps to reproduce (if applicable)
+- Potential impact assessment
+
+## Disclosure Process
+
+- Reports will be acknowledged as reasonably possible
+- Valid issues will be investigated and addressed
+- Fixes may be released silently or with minimal disclosure
+  when appropriate to reduce exploit risk
+
+## Automation and CI Security
+
+- GitHub Actions are restricted by allowlist
+- All actions are pinned to full-length commit SHAs
+- Forked pull requests require explicit approval before workflows run
+- Automation cannot bypass branch protection or human review
+
+## Project Security Model
+
+EmbryoLock is designed around:
+- Open-source transparency
+- Constrained execution
+- Immutable release artifacts
+- Human-controlled trust boundaries
+
+Security is treated as a property of structure, not secrecy.
+
+Thank you for helping keep this project safe.
+
+
+
+
+
+updated 1/17/26
+____________________________________________________________________________________
+# Security Policy
+
 ## Scope and Intent
 
 EmbryoLock is a **local file vault** designed around a specific threat model:

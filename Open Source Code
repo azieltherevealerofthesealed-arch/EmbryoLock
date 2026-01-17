@@ -1,0 +1,658 @@
+import os
+import json
+import shutil
+import hashlib
+import uuid
+from pathlib import Path
+from datetime import datetime
+
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog, colorchooser, ttk
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except Exception:
+    AESGCM = None
+
+from argon2.low_level import hash_secret_raw, Type as Argon2Type
+
+# =========================
+# EMBRYOLOCK STEALTH+ v1.1 (Functional + Stealth Overlay)
+# - Password = key (burns on wipe)
+# - One-time initialization (gold)
+# - First-login tether then normal login
+# - 5 bad attempts => full wipe
+# - Multi-vault + per-vault color coding
+# - Vault: encrypt/decrypt files, search by original name
+# - Stealth overlay: Ctrl+Shift+S (panic) toggles to a decoy Notes window
+# =========================
+
+APP_ID = "embryolock_stealth_plus"
+APP_DIR = Path.home() / f".{APP_ID}"
+
+STATE_FLAG     = APP_DIR / "initialized.flag"
+SALT_FILE      = APP_DIR / "salt.bin"
+VERIFIER_FILE  = APP_DIR / "verifier.bin"
+ATTEMPTS_FILE  = APP_DIR / "attempts.txt"
+
+VAULTS_FILE    = APP_DIR / "vaults.json"
+TEMP_DIR       = APP_DIR / "temp_decrypted"
+
+MAX_ATTEMPTS = 3
+
+# -------------------------
+# Helpers
+# -------------------------
+def ensure_dirs():
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    if not VAULTS_FILE.exists():
+        save_vaults(default_vaults())
+
+def sha256(b: bytes) -> bytes:
+    return hashlib.sha256(b).digest()
+
+def derive_key(password: str, salt: bytes) -> bytes:
+    return hash_secret_raw(
+        secret=password.encode("utf-8"),
+        salt=salt,
+        time_cost=3,
+        memory_cost=64 * 1024,
+        parallelism=2,
+        hash_len=32,
+        type=Argon2Type.ID
+    )
+
+def get_attempts() -> int:
+    try:
+        return int(ATTEMPTS_FILE.read_text())
+    except Exception:
+        return 0
+
+def set_attempts(n: int) -> None:
+    try:
+        ATTEMPTS_FILE.write_text(str(int(n)))
+    except Exception:
+        pass
+
+def is_initialized() -> bool:
+    return STATE_FLAG.exists() and SALT_FILE.exists() and VERIFIER_FILE.exists()
+
+def hard_fail_crypto():
+    messagebox.showerror(
+        "Missing dependency",
+        "This build requires the 'cryptography' package.\n\n"
+        "If running from Python, install it with:\n"
+        "pip install cryptography\n\n"
+        "If running the EXE, rebuild after installing cryptography."
+    )
+    raise SystemExit
+
+def wipe_all():
+    try:
+        if APP_DIR.exists():
+            shutil.rmtree(APP_DIR)
+    except Exception:
+        pass
+
+    messagebox.showerror(
+        "EmbryoLock Stealth+",
+        "Three incorrect attempts detected.\n\n"
+        "All data, keys, and vault state have been permanently destroyed.\n"
+        "All data, keys, and vault state have been permanently destroyed."
+    )
+    raise SystemExit
+
+def now_iso():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def sanitize_filename(name: str) -> str:
+    bad = '<>:"/\\|?*'
+    out = "".join("_" if c in bad else c for c in name)
+    out = out.strip().strip(".")
+    return out[:180] if out else "file"
+
+def format_size(n):
+    try:
+        n = int(n)
+    except Exception:
+        return "?"
+    for unit in ["B", "KB", "MB", "GB"]:
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+# -------------------------
+# Vault model
+# Each vault has its own:
+#   vault_<id>/store
+#   vault_<id>/files.json
+# -------------------------
+def vault_root(vault_id: int) -> Path:
+    return APP_DIR / f"vault_{vault_id}"
+
+def vault_store(vault_id: int) -> Path:
+    return vault_root(vault_id) / "store"
+
+def vault_db_file(vault_id: int) -> Path:
+    return vault_root(vault_id) / "files.json"
+
+def ensure_vault_dirs(vault_id: int):
+    vr = vault_root(vault_id)
+    vs = vault_store(vault_id)
+    vr.mkdir(parents=True, exist_ok=True)
+    vs.mkdir(parents=True, exist_ok=True)
+    dbf = vault_db_file(vault_id)
+    if not dbf.exists():
+        dbf.write_text(json.dumps({"files": []}, indent=2))
+
+def load_db(vault_id: int):
+    ensure_vault_dirs(vault_id)
+    try:
+        return json.loads(vault_db_file(vault_id).read_text())
+    except Exception:
+        return {"files": []}
+
+def save_db(vault_id: int, db):
+    ensure_vault_dirs(vault_id)
+    vault_db_file(vault_id).write_text(json.dumps(db, indent=2))
+
+def encrypt_to_store(vault_id: int, src_path: Path, master_key: bytes) -> dict:
+    if AESGCM is None:
+        hard_fail_crypto()
+
+    ensure_vault_dirs(vault_id)
+    file_salt = os.urandom(16)
+    nonce = os.urandom(12)
+    aes_key = hashlib.pbkdf2_hmac("sha256", master_key, file_salt, 200_000, dklen=32)
+    aes = AESGCM(aes_key)
+
+    plaintext = src_path.read_bytes()
+    ciphertext = aes.encrypt(nonce, plaintext, None)
+
+    file_id = str(uuid.uuid4())
+    out_path = vault_store(vault_id) / f"{file_id}.emb"
+    out_path.write_bytes(file_salt + nonce + ciphertext)
+
+    meta = {
+        "id": file_id,
+        "orig_name": src_path.name,
+        "size": len(plaintext),
+        "added": now_iso(),
+        "sha256": hashlib.sha256(plaintext).hexdigest(),
+        "store_name": out_path.name,
+    }
+    return meta
+
+def decrypt_from_store(vault_id: int, file_id: str, master_key: bytes, out_dir: Path) -> Path:
+    if AESGCM is None:
+        hard_fail_crypto()
+
+    ensure_vault_dirs(vault_id)
+    db = load_db(vault_id)
+    entry = next((f for f in db.get("files", []) if f.get("id") == file_id), None)
+    if not entry:
+        raise FileNotFoundError("File record not found.")
+
+    enc_path = vault_store(vault_id) / entry["store_name"]
+    if not enc_path.exists():
+        raise FileNotFoundError("Encrypted blob missing.")
+
+    raw = enc_path.read_bytes()
+    file_salt, nonce, ciphertext = raw[:16], raw[16:28], raw[28:]
+    aes_key = hashlib.pbkdf2_hmac("sha256", master_key, file_salt, 200_000, dklen=32)
+    aes = AESGCM(aes_key)
+    plaintext = aes.decrypt(nonce, ciphertext, None)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_name = sanitize_filename(entry["orig_name"])
+    out_path = out_dir / out_name
+    out_path.write_bytes(plaintext)
+    return out_path
+
+# -------------------------
+# Vault list storage
+# -------------------------
+def default_vaults():
+    return {
+        "selected": 1,
+        "vaults": [
+            {"id": 1, "name": "Primary", "color": "#6A1B9A"},   # purple
+            {"id": 2, "name": "Secondary", "color": "#D4AF37"}, # gold
+        ]
+    }
+
+def load_vaults():
+    if VAULTS_FILE.exists():
+        try:
+            return json.loads(VAULTS_FILE.read_text())
+        except Exception:
+            pass
+    return default_vaults()
+
+def save_vaults(v):
+    VAULTS_FILE.write_text(json.dumps(v, indent=2))
+
+# -------------------------
+# Password entry widget with eyeball toggle
+# -------------------------
+def password_row(parent, label_text: str, fg="white", bg="#0b0012",
+                 entry_bg="#13001f", entry_fg="#E5FFE5", ins="#D4AF37"):
+    row = tk.Frame(parent, bg=bg)
+    row.pack(pady=6)
+
+    tk.Label(row, text=label_text, bg=bg, fg=fg, font=("Segoe UI", 10)).pack(side="left", padx=(0, 8))
+
+    var = tk.StringVar()
+    ent = tk.Entry(row, textvariable=var, show="*", width=30,
+                   bg=entry_bg, fg=entry_fg, insertbackground=ins, relief="flat", font=("Segoe UI", 11))
+    ent.pack(side="left")
+
+    def toggle():
+        ent.configure(show="" if ent.cget("show") == "*" else "*")
+
+    eye = tk.Button(row, text="👁", command=toggle, width=3)
+    eye.pack(side="left", padx=6)
+
+    return var, ent
+
+# =========================
+# GOLD INITIALIZATION UI
+# =========================
+def init_ui():
+    ensure_dirs()
+
+    win = tk.Tk()
+    win.title("EmbryoLock Stealth+ — Initialization")
+    win.geometry("540x380")
+    win.configure(bg="#b08d2c")
+    win.resizable(False, False)
+
+    tk.Label(win, text="SECURE INITIAL SETUP",
+             bg="#b08d2c", fg="black", font=("Segoe UI", 16, "bold")).pack(pady=10)
+
+    tk.Label(
+        win,
+        text=(
+            "• Your password becomes your key\n"
+            "• Five wrong attempts destroys everything\n"
+            "• No recovery\n\n"
+            "This setup can only be performed once."
+        ),
+        bg="#b08d2c", fg="black",
+        font=("Segoe UI", 10), justify="left"
+    ).pack(pady=6)
+
+    pw1 = tk.StringVar()
+    pw2 = tk.StringVar()
+
+    row1 = tk.Frame(win, bg="#b08d2c"); row1.pack(pady=6)
+    tk.Label(row1, text="Password:", bg="#b08d2c", fg="black", font=("Segoe UI", 10)).pack(side="left", padx=(0,8))
+    e1 = tk.Entry(row1, textvariable=pw1, show="*", width=30); e1.pack(side="left")
+    tk.Button(row1, text="👁", width=3, command=lambda: e1.config(show="" if e1.cget("show")=="*" else "*")).pack(side="left", padx=6)
+
+    row2 = tk.Frame(win, bg="#b08d2c"); row2.pack(pady=6)
+    tk.Label(row2, text="Verify:", bg="#b08d2c", fg="black", font=("Segoe UI", 10)).pack(side="left", padx=(0,8))
+    e2 = tk.Entry(row2, textvariable=pw2, show="*", width=30); e2.pack(side="left")
+    tk.Button(row2, text="👁", width=3, command=lambda: e2.config(show="" if e2.cget("show")=="*" else "*")).pack(side="left", padx=6)
+
+    def initialize():
+        a = pw1.get()
+        b = pw2.get()
+        if not a or a != b or len(a) < 6:
+            messagebox.showerror("Error", "Passwords must match (min 6 characters).")
+            return
+
+        salt = os.urandom(16)
+        key = derive_key(a, salt)
+
+        SALT_FILE.write_bytes(salt)
+        VERIFIER_FILE.write_bytes(sha256(key))
+        STATE_FLAG.write_text("initialized")
+        set_attempts(0)
+
+        v = load_vaults()
+        save_vaults(v)
+        for vv in v["vaults"]:
+            ensure_vault_dirs(int(vv["id"]))
+
+        win.destroy()
+        login_ui(first_login=True)
+
+    tk.Button(win, text="Initialize & Lock In", command=initialize,
+              bg="black", fg="gold", width=28).pack(pady=18)
+
+    tk.Label(win, text="Stealth toggle inside app: Ctrl+Shift+S",
+             bg="#b08d2c", fg="black", font=("Segoe UI", 9)).pack(pady=(6,0))
+
+    win.mainloop()
+
+# =========================
+# LOGIN UI
+# =========================
+def login_ui(first_login=False):
+    ensure_dirs()
+
+    salt = SALT_FILE.read_bytes()
+    verifier = VERIFIER_FILE.read_bytes()
+
+    win = tk.Tk()
+    win.title("EmbryoLock Stealth+ — Login")
+    win.geometry("540x270")
+    win.configure(bg="#0b0012")
+    win.resizable(False, False)
+
+    label = "Enter Password" if first_login else "Enter Password"
+    tk.Label(win, text=label, bg="#0b0012", fg="#D4AF37",
+             font=("Segoe UI", 12, "bold")).pack(pady=12)
+
+    tk.Label(win, text="3 wrong attempts = full wipe. No recovery.",
+             bg="#0b0012", fg="#aaaaaa", font=("Segoe UI", 9)).pack()
+
+    pw_var, pw_entry = password_row(win, "Password:", fg="#D4AF37", bg="#0b0012", ins="#D4AF37")
+    pw_entry.focus_set()
+
+    def attempt():
+        entered = pw_var.get()
+        key = derive_key(entered, salt)
+        if sha256(key) == verifier:
+            set_attempts(0)
+            win.destroy()
+            main_app(key)
+        else:
+            tries = get_attempts() + 1
+            set_attempts(tries)
+            if tries >= MAX_ATTEMPTS:
+                win.destroy()
+                wipe_all()
+            else:
+                messagebox.showerror("Incorrect", f"Wrong password.\nAttempts remaining: {MAX_ATTEMPTS - tries}")
+
+    tk.Button(win, text="Unlock", command=attempt, bg="#6A1B9A", fg="#E5FFE5",
+              relief="flat", width=14).pack(pady=10)
+    win.bind("<Return>", lambda _e: attempt())
+    win.mainloop()
+
+# =========================
+# STEALTH+ MAIN APP (Functional + Stealth Overlay)
+# =========================
+def main_app(master_key: bytes):
+    ensure_dirs()
+    vaults = load_vaults()
+
+    root = tk.Tk()
+    root.title("EmbryoLock Stealth+")
+    root.geometry("1020x640")
+    root.configure(bg="#120016")
+
+    style = ttk.Style(root)
+    try:
+        style.theme_use("clam")
+    except Exception:
+        pass
+
+    # --- Decoy window (created hidden, shown on panic)
+    decoy = tk.Toplevel(root)
+    decoy.withdraw()
+    decoy.title("Notes")
+    decoy.geometry("860x560")
+    decoy.configure(bg="#ffffff")
+
+    tk.Label(decoy, text="Notes", bg="#ffffff", fg="#111111", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=12, pady=10)
+    notes = tk.Text(decoy, wrap="word", font=("Segoe UI", 11))
+    notes.pack(fill="both", expand=True, padx=12, pady=(0,12))
+    notes.insert("1.0", "Meeting notes...\n\n- \n- \n- \n")
+
+    def show_real():
+        decoy.withdraw()
+        root.deiconify()
+
+    tk.Button(decoy, text="Back", command=show_real).pack(pady=(0,10))
+
+    stealth_state = {"on": False}
+
+    def toggle_stealth(event=None):
+        stealth_state["on"] = not stealth_state["on"]
+        if stealth_state["on"]:
+            root.withdraw()
+            decoy.deiconify()
+            decoy.lift()
+        else:
+            decoy.withdraw()
+            root.deiconify()
+            root.lift()
+
+    root.bind_all("<Control-Shift-s>", toggle_stealth)
+
+    top = tk.Frame(root, bg="#120016")
+    top.pack(fill="x", padx=14, pady=12)
+
+    tk.Label(top, text="EMBRYOLOCK STEALTH+", bg="#120016", fg="#D4AF37",
+             font=("Segoe UI", 18, "bold")).pack(side="left")
+
+    # Search bar
+    search_var = tk.StringVar()
+    tk.Label(top, text="Search:", bg="#120016", fg="#E5FFE5", font=("Segoe UI", 10)).pack(side="left", padx=(20, 6))
+    search_entry = tk.Entry(top, textvariable=search_var, width=40,
+                            bg="#1b0022", fg="#E5FFE5", insertbackground="#D4AF37", relief="flat")
+    search_entry.pack(side="left")
+
+    # Vault selector
+    vault_var = tk.StringVar(value=str(vaults.get("selected", 1)))
+
+    def vault_label():
+        vid = int(vault_var.get())
+        v = next((x for x in vaults["vaults"] if int(x["id"]) == vid), None)
+        return f'Vault: {v["name"] if v else vid}'
+
+    vault_name_lbl = tk.Label(top, text=vault_label(), bg="#120016", fg="#E5FFE5", font=("Segoe UI", 10, "bold"))
+    vault_name_lbl.pack(side="right")
+
+    vault_menu = tk.OptionMenu(top, vault_var, *[str(v["id"]) for v in vaults["vaults"]])
+    vault_menu.pack(side="right", padx=(8, 10))
+
+    btns = tk.Frame(root, bg="#120016")
+    btns.pack(fill="x", padx=14, pady=(0, 10))
+
+    cols = ("name", "size", "added")
+    tree = ttk.Treeview(root, columns=cols, show="headings", height=20)
+    tree.heading("name", text="Original name")
+    tree.heading("size", text="Size")
+    tree.heading("added", text="Added")
+    tree.column("name", width=620)
+    tree.column("size", width=120, anchor="e")
+    tree.column("added", width=220, anchor="w")
+    tree.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+
+    status = tk.Label(root, text="", bg="#120016", fg="#E5FFE5", anchor="w")
+    status.pack(fill="x", padx=14, pady=(0, 10))
+
+    def refresh_theme():
+        vid = int(vault_var.get())
+        v = next((x for x in vaults["vaults"] if int(x["id"]) == vid), None)
+        color = v.get("color", "#120016") if v else "#120016"
+        root.configure(bg=color)
+        top.configure(bg=color)
+        btns.configure(bg=color)
+        status.configure(bg=color)
+        vault_name_lbl.configure(bg=color, text=vault_label())
+
+    def selected_id():
+        sel = tree.selection()
+        return sel[0] if sel else None
+
+    def refresh():
+        vid = int(vault_var.get())
+        ensure_vault_dirs(vid)
+
+        tree.delete(*tree.get_children())
+        db = load_db(vid)
+        q = search_var.get().strip().lower()
+
+        rows = []
+        for f in db.get("files", []):
+            name = f.get("orig_name", "")
+            if q and q not in name.lower():
+                continue
+            rows.append(f)
+        rows.sort(key=lambda x: x.get("added", ""), reverse=True)
+        for f in rows:
+            tree.insert("", "end", iid=f["id"], values=(f["orig_name"], format_size(f.get("size", 0)), f.get("added", "")))
+
+        status.config(text=f"{len(rows)} file(s) shown • {vault_label()} • Stealth toggle: Ctrl+Shift+S")
+
+    def change_vault(*_):
+        vaults["selected"] = int(vault_var.get())
+        save_vaults(vaults)
+        refresh_theme()
+        refresh()
+
+    def add_vault():
+        name = simpledialog.askstring("New Vault", "Vault name:")
+        if not name:
+            return
+        color = colorchooser.askcolor()[1] or "#6A1B9A"
+        next_id = max(int(v["id"]) for v in vaults["vaults"]) + 1
+        vaults["vaults"].append({"id": next_id, "name": name, "color": color})
+        save_vaults(vaults)
+        ensure_vault_dirs(next_id)
+        vault_var.set(str(next_id))
+
+    def rename_vault():
+        vid = int(vault_var.get())
+        v = next((x for x in vaults["vaults"] if int(x["id"]) == vid), None)
+        if not v:
+            return
+        new_name = simpledialog.askstring("Rename Vault", "New vault name:", initialvalue=v.get("name", ""))
+        if not new_name:
+            return
+        v["name"] = new_name
+        save_vaults(vaults)
+        refresh_theme()
+        refresh()
+
+    def recolor_vault():
+        vid = int(vault_var.get())
+        v = next((x for x in vaults["vaults"] if int(x["id"]) == vid), None)
+        if not v:
+            return
+        color = colorchooser.askcolor(color=v.get("color", "#120016"))[1]
+        if not color:
+            return
+        v["color"] = color
+        save_vaults(vaults)
+        refresh_theme()
+
+    def add_files():
+        vid = int(vault_var.get())
+        paths = filedialog.askopenfilenames(title="Add files to vault")
+        if not paths:
+            return
+        db = load_db(vid)
+        added = 0
+        for p in paths:
+            try:
+                meta = encrypt_to_store(vid, Path(p), master_key)
+                db["files"].append(meta)
+                added += 1
+            except Exception as e:
+                messagebox.showerror("Add failed", f"Could not add:\n{p}\n\n{e}")
+        save_db(vid, db)
+        refresh()
+        if added:
+            messagebox.showinfo("Added", f"Added {added} file(s) to the vault.")
+
+    def open_file():
+        vid = int(vault_var.get())
+        fid = selected_id()
+        if not fid:
+            messagebox.showinfo("Open", "Select a file first.")
+            return
+        try:
+            out = decrypt_from_store(vid, fid, master_key, TEMP_DIR / f"vault_{vid}")
+            os.startfile(str(out))
+            messagebox.showinfo("Decrypted copy opened",
+                                f"A decrypted copy was written to:\n\n{out}\n\nUse 'Purge Temp' to remove decrypted copies.")
+        except Exception as e:
+            messagebox.showerror("Open failed", str(e))
+
+    def export_file():
+        vid = int(vault_var.get())
+        fid = selected_id()
+        if not fid:
+            messagebox.showinfo("Export", "Select a file first.")
+            return
+        target_dir = filedialog.askdirectory(title="Choose export folder")
+        if not target_dir:
+            return
+        try:
+            out = decrypt_from_store(vid, fid, master_key, Path(target_dir))
+            messagebox.showinfo("Exported", f"Decrypted file exported to:\n\n{out}")
+        except Exception as e:
+            messagebox.showerror("Export failed", str(e))
+
+    def delete_file():
+        vid = int(vault_var.get())
+        fid = selected_id()
+        if not fid:
+            messagebox.showinfo("Delete", "Select a file first.")
+            return
+        if not messagebox.askyesno("Delete", "Delete selected file from this vault?\n\nThis cannot be undone."):
+            return
+        db = load_db(vid)
+        entry = next((f for f in db.get("files", []) if f.get("id") == fid), None)
+        if entry:
+            try:
+                (vault_store(vid) / entry["store_name"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+            db["files"] = [f for f in db.get("files", []) if f.get("id") != fid]
+            save_db(vid, db)
+            refresh()
+
+    def purge_temp():
+        try:
+            if TEMP_DIR.exists():
+                shutil.rmtree(TEMP_DIR)
+            TEMP_DIR.mkdir(parents=True, exist_ok=True)
+            messagebox.showinfo("Purged", "Decrypted temp copies removed.")
+        except Exception as e:
+            messagebox.showerror("Purge failed", str(e))
+
+    def lock_exit():
+        try:
+            decoy.destroy()
+        except Exception:
+            pass
+        root.destroy()
+
+    tk.Button(btns, text="+ Vault", command=add_vault, bg="#2a0033", fg="#E5FFE5", relief="flat", width=10).pack(side="left", padx=4)
+    tk.Button(btns, text="Rename", command=rename_vault, bg="#2a0033", fg="#E5FFE5", relief="flat", width=10).pack(side="left", padx=4)
+    tk.Button(btns, text="Recolor", command=recolor_vault, bg="#2a0033", fg="#E5FFE5", relief="flat", width=10).pack(side="left", padx=4)
+
+    tk.Button(btns, text="Add Files", command=add_files, bg="#6A1B9A", fg="#E5FFE5", relief="flat", width=12).pack(side="left", padx=(18,4))
+    tk.Button(btns, text="Open", command=open_file, bg="#6A1B9A", fg="#E5FFE5", relief="flat", width=10).pack(side="left", padx=4)
+    tk.Button(btns, text="Export", command=export_file, bg="#6A1B9A", fg="#E5FFE5", relief="flat", width=10).pack(side="left", padx=4)
+    tk.Button(btns, text="Delete", command=delete_file, bg="#6A1B9A", fg="#E5FFE5", relief="flat", width=10).pack(side="left", padx=4)
+    tk.Button(btns, text="Purge Temp", command=purge_temp, bg="#6A1B9A", fg="#E5FFE5", relief="flat", width=12).pack(side="left", padx=4)
+
+    tk.Button(btns, text="Panic (Ctrl+Shift+S)", command=toggle_stealth, bg="#D4AF37", fg="#120016", relief="flat", width=18).pack(side="right", padx=4)
+    tk.Button(btns, text="Lock & Exit", command=lock_exit, bg="#2a0033", fg="#E5FFE5", relief="flat", width=12).pack(side="right", padx=4)
+
+    vault_var.trace_add("write", change_vault)
+    search_var.trace_add("write", lambda *_: refresh())
+
+    refresh_theme()
+    refresh()
+    root.mainloop()
+
+# =========================
+# ENTRY POINT
+# =========================
+if __name__ == "__main__":
+    ensure_dirs()
+    if not is_initialized():
+        init_ui()
+    else:
+        login_ui()
